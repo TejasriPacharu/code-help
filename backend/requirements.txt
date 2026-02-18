@@ -1,0 +1,23 @@
+# AI Software Engineering Copilot - Backend Dependencies
+
+# OpenAI Agents SDK
+openai-agents>=0.1.0
+
+# ChatKit for chat interface
+openai-chatkit>=1.0.0
+
+# FastAPI and server
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# Pydantic for data validation
+pydantic>=2.0.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# HTTP client (used by agents)
+httpx>=0.26.0
+
+# Additional utilities
+typing-extensions>=4.9.0
