@@ -1,3 +1,8 @@
+"""
+This file has the routes and main server setup for the Copilot backend.
+
+"""
+
 from __future__ import annotations as _annotations
 
 import json
@@ -9,20 +14,6 @@ from fastapi import Depends, FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 
-from copilot.agents import (
-    bug_diagnosis_agent,
-    documentation_agent,
-    refactoring_agent,
-    security_review_agent,
-    test_generator_agent,
-    triage_agent,
-)
-from copilot.context import (
-    CopilotChatContext,
-    CopilotContext,
-    create_initial_context,
-    public_context,
-)
 from server import CopilotServer
 
 
@@ -111,7 +102,7 @@ async def health_check() -> Dict[str, str]:
 
 
 @app.get("/")
-async def root() -> Dict[str, str]:
+async def root() -> Dict[str, Any]:
     """Root endpoint with service information."""
     return {
         "service": "AI Software Engineering Copilot",
@@ -125,19 +116,3 @@ async def root() -> Dict[str, str]:
             "Documentation Agent",
         ],
     }
-
-
-__all__ = [
-    "CopilotChatContext",
-    "CopilotContext",
-    "app",
-    "bug_diagnosis_agent",
-    "chat_server",
-    "create_initial_context",
-    "documentation_agent",
-    "public_context",
-    "refactoring_agent",
-    "security_review_agent",
-    "test_generator_agent",
-    "triage_agent",
-]

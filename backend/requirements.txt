@@ -16,7 +16,7 @@ pydantic>=2.0.0
 # Environment variables
 python-dotenv>=1.0.0
 
-# HTTP client (used by agents)
+# HTTP client (used by agents and GitHub API)
 httpx>=0.26.0
 
 # Additional utilities

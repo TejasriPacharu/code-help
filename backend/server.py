@@ -10,6 +10,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
+from copilot.preprocessing import preprocess_user_input
+
 from agents import (
     Handoff,
     HandoffOutputItem,
@@ -336,6 +338,17 @@ class CopilotServer(ChatKitServer[dict[str, Any]]):
         yield ClientEffectEvent(name="runner_bind_thread", data={"thread_id": thread.id, "ts": time.time()})
 
         try:
+            # AFTER — preprocess first, then runner, so that any context updates from preprocessing are included in the initial run.
+            if user_text:
+                state.context = await preprocess_user_input(user_text, state.context)
+                # Rebuild chat_context since state was mutated
+                chat_context = CopilotChatContext(
+                    thread=thread,
+                    store=self.store,
+                    request_context=context,
+                    state=state.context,
+                )
+
             result = Runner.run_streamed(
                 _get_agent_by_name(state.current_agent_name),
                 state.input_items,

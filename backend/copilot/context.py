@@ -2,85 +2,102 @@ from __future__ import annotations as _annotations
 
 from chatkit.agents import AgentContext
 from pydantic import BaseModel
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from .github_service import RepoContext
 
 
 class CopilotContext(BaseModel):
-    """Context for AI Software Engineering Copilot agents."""
+    """
+    Runtime context for AI Software Engineering Copilot agents.
     
-    # Project information
+    Lifecycle:
+      1. preprocessing.py populates repo_context before agents run
+      2. Agents read from repo_context via tools — they never mutate it
+      3. Analysis results (complexity_score, vulnerabilities, etc.) are
+         written by tools after analysis completes
+    """
+
+    # ── Ingestion layer (set by preprocessing.py, read-only for agents) ──
+    repo_context: Optional["RepoContext"] = None
+    github_url: str | None = None
+    github_owner: str | None = None
+    github_repo: str | None = None
+    github_branch: str | None = None
+
+    # ── Derived metadata (populated from repo_context by preprocessing) ──
     project_name: str | None = None
     repo_path: str | None = None
     current_file: str | None = None
-    language: str | None = None  # python, javascript, typescript, etc.
-    framework: str | None = None  # flask, fastapi, react, etc.
-    
-    # Bug diagnosis context
+    language: str | None = None
+    framework: str | None = None
+
+    # ── Bug diagnosis results ──
     error_message: str | None = None
     stack_trace: str | None = None
-    error_type: str | None = None  # performance, runtime, logic, etc.
+    error_type: str | None = None
     affected_endpoint: str | None = None
     diagnosis_report: str | None = None
-    
-    # Refactoring context
+
+    # ── Refactoring results ──
     code_smells: list[str] | None = None
     refactoring_suggestions: list[dict[str, str]] | None = None
     complexity_score: float | None = None
-    
-    # Testing context
+
+    # ── Testing results ──
     test_coverage: float | None = None
-    test_framework: str | None = None  # pytest, jest, unittest, etc.
+    test_framework: str | None = None
     generated_tests: list[dict[str, str]] | None = None
     load_test_config: dict[str, str] | None = None
-    
-    # Security context
+
+    # ── Security results ──
     vulnerabilities: list[dict[str, str]] | None = None
     security_score: float | None = None
     rate_limit_config: dict[str, str] | None = None
     dependency_audit: list[dict[str, str]] | None = None
-    
-    # Documentation context
-    documentation_type: str | None = None  # api, readme, docstring, etc.
+
+    # ── Documentation results ──
+    documentation_type: str | None = None
     generated_docs: str | None = None
-    
-    # Internal tracking
-    scenario: str | None = None  # demo scenario being used
-    analysis_history: list[dict[str, str]] | None = None
+
+    class Config:
+        arbitrary_types_allowed = True
 
 
 class CopilotChatContext(AgentContext[dict]):
-    """
-    AgentContext wrapper used during ChatKit runs.
-    Holds the persisted CopilotContext in `state`.
-    """
+    """AgentContext wrapper used during ChatKit runs."""
     state: CopilotContext
 
 
 def create_initial_context() -> CopilotContext:
-    """
-    Factory for a new CopilotContext.
-    Starts empty; values are populated during the conversation.
-    """
     return CopilotContext()
 
 
 def public_context(ctx: CopilotContext) -> dict:
     """
-    Return a filtered view of the context for UI display.
-    Hides internal fields and only shows relevant information.
+    Filtered context view for UI display.
+    Excludes large objects and None values.
+    Exposes a lightweight repo summary instead of the full RepoContext.
     """
     data = ctx.model_dump()
-    
-    # Hide internal tracking fields
-    hidden_keys = {
-        "scenario",
-        "analysis_history",
-    }
-    
-    for key in list(data.keys()):
-        if key in hidden_keys:
-            data.pop(key, None)
-        # Remove None values for cleaner display
-        elif data[key] is None:
-            data.pop(key, None)
-    
+
+    # Never expose these to the UI
+    data.pop("repo_context", None)
+
+    # Remove None values for clean display
+    data = {k: v for k, v in data.items() if v is not None}
+
+    # Inject lightweight repo summary
+    if ctx.repo_context:
+        repo = ctx.repo_context
+        data["repo_loaded"] = {
+            "full_name": repo.meta.full_name,
+            "language": repo.primary_language,
+            "framework": repo.framework,
+            "files_fetched": len(repo.file_contents),
+            "total_files": repo.total_files,
+            "entry_points": repo.entry_points,
+        }
+
     return data

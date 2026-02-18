@@ -1,4 +1,9 @@
-"""AI Software Engineering Copilot - Multi-agent system for code analysis and improvement."""
+"""
+AI Software Engineering Copilot
+
+Multi-agent system for analyzing real code from GitHub repositories.
+Provides bug diagnosis, security scanning, test generation, and documentation.
+"""
 
 from .agents import (
     bug_diagnosis_agent,
@@ -15,24 +20,21 @@ from .context import (
     public_context,
 )
 from .guardrails import jailbreak_guardrail, relevance_guardrail
-from .tools import (
-    analyze_code_quality,
-    analyze_coverage,
-    analyze_logs,
-    apply_refactoring,
-    audit_dependencies,
-    check_rate_limiting,
-    detect_project,
-    explain_code,
-    generate_api_docs,
-    generate_docstrings,
-    generate_load_tests,
-    generate_unit_tests,
-    get_performance_metrics,
-    scan_vulnerabilities,
-    suggest_fix,
-    suggest_refactoring,
-    trace_error,
+from .tools_github import (
+    analyze_github_code,
+    scan_github_repo_security,
+    get_repo_structure,
+    generate_tests_for_github_file,
+    explain_github_code,
+    detect_github_url,
+)
+from .github_service import (
+    GitHubClient,
+    GitHubURLParser,
+    GitHubError,
+    RepoAnalyzer,
+    fetch_github_file,
+    analyze_github_repo,
 )
 
 __all__ = [
@@ -51,22 +53,19 @@ __all__ = [
     # Guardrails
     "jailbreak_guardrail",
     "relevance_guardrail",
-    # Tools
-    "analyze_code_quality",
-    "analyze_coverage",
-    "analyze_logs",
-    "apply_refactoring",
-    "audit_dependencies",
-    "check_rate_limiting",
-    "detect_project",
-    "explain_code",
-    "generate_api_docs",
-    "generate_docstrings",
-    "generate_load_tests",
-    "generate_unit_tests",
-    "get_performance_metrics",
-    "scan_vulnerabilities",
-    "suggest_fix",
-    "suggest_refactoring",
-    "trace_error",
+    # GitHub Tools
+    "fetch_github_url",
+    "analyze_github_code",
+    "scan_github_repo_security",
+    "get_repo_structure",
+    "generate_tests_for_github_file",
+    "explain_github_code",
+    "detect_github_url",
+    # GitHub Service
+    "GitHubClient",
+    "GitHubURLParser",
+    "GitHubError",
+    "RepoAnalyzer",
+    "fetch_github_file",
+    "analyze_github_repo",
 ]

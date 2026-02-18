@@ -1,38 +1,24 @@
-from __future__ import annotations as _annotations
+"""
+AI Software Engineering Copilot - Agent Definitions
 
-import random
-import string
+All agents use GitHub tools to analyze REAL code from repositories.
+No mock data - everything is fetched from actual GitHub URLs.
+"""
+
+from __future__ import annotations as _annotations
 
 from agents import Agent, RunContextWrapper, handoff
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 
 from .context import CopilotChatContext
-from .demo_data import apply_codebase_defaults
 from .guardrails import jailbreak_guardrail, relevance_guardrail
-from .tools import (
-    # Triage tools
-    detect_project,
-    # Bug Diagnosis tools
-    analyze_logs,
-    trace_error,
-    suggest_fix,
-    get_performance_metrics,
-    # Refactoring tools
-    analyze_code_quality,
-    suggest_refactoring,
-    apply_refactoring,
-    # Test Generation tools
-    generate_unit_tests,
-    generate_load_tests,
-    analyze_coverage,
-    # Security tools
-    scan_vulnerabilities,
-    check_rate_limiting,
-    audit_dependencies,
-    # Documentation tools
-    generate_api_docs,
-    explain_code,
-    generate_docstrings,
+from .tools_github import (
+    analyze_github_code,
+    scan_github_repo_security,
+    get_repo_structure,
+    generate_tests_for_github_file,
+    explain_github_code,
+    detect_github_url,
 )
 
 
@@ -47,35 +33,60 @@ def bug_diagnosis_instructions(
     run_context: RunContextWrapper[CopilotChatContext], agent: Agent[CopilotChatContext]
 ) -> str:
     ctx = run_context.context.state
-    project = ctx.project_name or "[unknown]"
-    error_type = ctx.error_type or "[not yet diagnosed]"
-    endpoint = ctx.affected_endpoint or "[unknown]"
-    
+    project = ctx.project_name or "[no project loaded]"
+    github_url = ctx.github_url or "[no GitHub URL]"
+    current_file = ctx.current_file or "[no file loaded]"
+
+    # Surface repo loading status so LLM knows what's available
+    if ctx.repo_context:
+        repo = ctx.repo_context
+        files_loaded = len(repo.file_contents)
+        total_files = repo.total_files
+        repo_status = (
+            f"✅ Repository loaded: {repo.meta.full_name} "
+            f"({files_loaded} files fetched of {total_files} total)"
+        )
+        available_files = "\n".join(
+            f"  - {path}" for path in list(repo.file_contents.keys())[:10]
+        )
+        if files_loaded > 10:
+            available_files += f"\n  - ... and {files_loaded - 10} more"
+    else:
+        repo_status = "⚠️ No repository loaded. Ask user for a GitHub URL."
+        available_files = ""
+
     return (
         f"{RECOMMENDED_PROMPT_PREFIX}\n"
-        "You are the Bug Diagnosis Agent. You analyze errors, performance issues, and help identify root causes.\n\n"
-        f"Current project: {project}\n"
-        f"Error type: {error_type}\n"
-        f"Affected endpoint: {endpoint}\n\n"
-        "Your workflow:\n"
-        "1. Use analyze_logs to examine error patterns and warnings\n"
-        "2. Use get_performance_metrics to understand system behavior\n"
-        "3. Use trace_error to identify root causes\n"
-        "4. Use suggest_fix to propose solutions\n\n"
-        "Work autonomously: chain multiple tool calls to build a complete diagnosis before responding.\n"
-        "If the issue involves security concerns, hand off to the Security Review Agent.\n"
-        "If the user wants performance tests, hand off to the Test Generator Agent.\n"
-        "If code changes are needed, hand off to the Refactoring Agent.\n"
-        "When done or if the topic changes, hand off back to the Triage Agent."
-    )
+        "You are the Bug Diagnosis Agent. You analyze real code from GitHub for bugs and performance issues.\n\n"
 
+        f"Current project: {project}\n"
+        f"GitHub URL: {github_url}\n"
+        f"Current file: {current_file}\n"
+        f"Repo status: {repo_status}\n"
+        + (f"Available files:\n{available_files}\n" if available_files else "")
+        + "\n"
+        "## Code Access\n"
+        "Repository data is preloaded. Use `analyze_github_code` directly.\n"
+        "You can specify a file_path parameter to analyze a specific file from the list above.\n\n"
+
+        "## Your Workflow\n"
+        "1. Use `analyze_github_code` to find bugs, performance issues, and code smells\n"
+        "2. Explain issues with specific line numbers\n"
+        "3. Provide concrete code fixes\n\n"
+
+        "## Handoffs\n"
+        "- Security concerns → Security Review Agent\n"
+        "- Need tests → Test Generator Agent\n"
+        "- Code improvements → Refactoring Agent\n"
+        "- Done or topic changes → Triage Agent"
+    )
 
 bug_diagnosis_agent = Agent[CopilotChatContext](
     name="Bug Diagnosis Agent",
     model=MODEL,
-    handoff_description="Analyzes logs, traces errors, and diagnoses performance issues.",
+    handoff_description="Analyzes real GitHub code for bugs, errors, and performance issues.",
     instructions=bug_diagnosis_instructions,
-    tools=[analyze_logs, trace_error, suggest_fix, get_performance_metrics],
+    tools=[analyze_github_code],
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 
@@ -88,25 +99,51 @@ def refactoring_instructions(
     run_context: RunContextWrapper[CopilotChatContext], agent: Agent[CopilotChatContext]
 ) -> str:
     ctx = run_context.context.state
-    project = ctx.project_name or "[unknown]"
+    project = ctx.project_name or "[no project loaded]"
     complexity = ctx.complexity_score or "[not analyzed]"
     smells = len(ctx.code_smells) if ctx.code_smells else 0
     
+    if ctx.repo_context:
+        repo = ctx.repo_context
+        files_loaded = len(repo.file_contents)
+        total_files = repo.total_files
+        repo_status = (
+            f"✅ Repository loaded: {repo.meta.full_name} "
+            f"({files_loaded} files fetched of {total_files} total)"
+        )
+        available_files = "\n".join(
+            f"  - {path}" for path in list(repo.file_contents.keys())[:10]
+        )
+        if files_loaded > 10:
+            available_files += f"\n  - ... and {files_loaded - 10} more"
+    else:
+        repo_status = "⚠️ No repository loaded. Ask user for a GitHub URL."
+        available_files = ""
     return (
-        f"{RECOMMENDED_PROMPT_PREFIX}\n"
-        "You are the Refactoring Agent. You improve code quality, suggest design patterns, and generate cleaner code.\n\n"
-        f"Current project: {project}\n"
-        f"Complexity score: {complexity}\n"
-        f"Code smells found: {smells}\n\n"
-        "Your workflow:\n"
-        "1. Use analyze_code_quality to identify code smells and complexity issues\n"
-        "2. Use suggest_refactoring to propose improvement patterns\n"
-        "3. Use apply_refactoring to generate the refactored code\n\n"
-        "Work autonomously: analyze the code thoroughly before suggesting changes.\n"
-        "After refactoring, if the user wants tests, hand off to the Test Generator Agent.\n"
-        "If security issues are found, hand off to the Security Review Agent.\n"
-        "When done or if the topic changes, hand off back to the Triage Agent."
-    )
+    f"{RECOMMENDED_PROMPT_PREFIX}\n"
+    "You are the Refactoring Agent. You improve code quality and suggest design patterns.\n\n"
+
+    f"Current project: {project}\n"
+    f"Complexity score: {complexity}\n"
+    f"Code smells found: {smells}\n"
+    f"Repo status: {repo_status}\n"
+    + (f"Available files:\n{available_files}\n" if available_files else "")
+    +
+    "\n## Code Access\n"
+    "Repository data is preloaded. Use `analyze_github_code` directly.\n"
+    "You can specify a file_path parameter to target a specific file.\n\n"
+
+    "## Your Workflow\n"
+    "1. Use `analyze_github_code` to identify code smells and complexity\n"
+    "2. Suggest specific refactoring patterns (Repository, DataLoader, Caching, etc.)\n"
+    "3. Provide refactored code examples\n\n"
+
+    "## Handoffs\n"
+    "- Need tests after refactoring → Test Generator Agent\n"
+    "- Security issues found → Security Review Agent\n"
+    "- Need documentation → Documentation Agent\n"
+    "- Done → Triage Agent"
+)
 
 
 refactoring_agent = Agent[CopilotChatContext](
@@ -114,7 +151,7 @@ refactoring_agent = Agent[CopilotChatContext](
     model=MODEL,
     handoff_description="Analyzes code quality and suggests refactoring improvements.",
     instructions=refactoring_instructions,
-    tools=[analyze_code_quality, suggest_refactoring, apply_refactoring],
+    tools=[analyze_github_code],
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 
@@ -127,33 +164,64 @@ def test_generator_instructions(
     run_context: RunContextWrapper[CopilotChatContext], agent: Agent[CopilotChatContext]
 ) -> str:
     ctx = run_context.context.state
-    project = ctx.project_name or "[unknown]"
-    coverage = ctx.test_coverage or "[not analyzed]"
+    project = ctx.project_name or "[no project loaded]"
     framework = ctx.test_framework or "pytest"
-    
+    current_file = ctx.current_file or "[no file loaded]"
+
+    if ctx.repo_context:
+        repo = ctx.repo_context
+        files_loaded = len(repo.file_contents)
+        total_files = repo.total_files
+        repo_status = (
+            f"✅ Repository loaded: {repo.meta.full_name} "
+            f"({files_loaded} files fetched of {total_files} total)"
+        )
+        available_files = "\n".join(
+            f"  - {path}" for path in list(repo.file_contents.keys())[:10]
+        )
+        if files_loaded > 10:
+            available_files += f"\n  - ... and {files_loaded - 10} more"
+    else:
+        repo_status = "⚠️ No repository loaded. Ask user for a GitHub URL."
+        available_files = ""
+
     return (
-        f"{RECOMMENDED_PROMPT_PREFIX}\n"
-        "You are the Test Generator Agent. You create unit tests, integration tests, and load tests.\n\n"
-        f"Current project: {project}\n"
-        f"Test coverage: {coverage}%\n"
-        f"Test framework: {framework}\n\n"
-        "Your workflow:\n"
-        "1. Use analyze_coverage to understand current test gaps\n"
-        "2. Use generate_unit_tests to create tests for uncovered code\n"
-        "3. Use generate_load_tests for performance testing needs\n\n"
-        "Work autonomously: generate comprehensive tests that cover edge cases.\n"
-        "If bugs are found during testing, hand off to the Bug Diagnosis Agent.\n"
-        "If security tests are needed, hand off to the Security Review Agent.\n"
-        "When done or if the topic changes, hand off back to the Triage Agent."
-    )
+    f"{RECOMMENDED_PROMPT_PREFIX}\n"
+    "You are the Test Generator Agent. You create unit tests for real GitHub code.\n\n"
+
+    f"Current project: {project}\n"
+    f"Test framework: {framework}\n"
+    f"Current file: {current_file}\n"
+    f"Repo status: {repo_status}\n"
+    + (f"Available files:\n{available_files}\n" if available_files else "")
+    +
+    "\n## Code Access\n"
+    "Repository data is preloaded. Use `generate_tests_for_github_file` directly.\n"
+    "You can specify a file_path parameter to generate tests for a specific file.\n\n"
+
+    "## Your Workflow\n"
+    "1. Use `generate_tests_for_github_file` to create test templates\n"
+    "2. Explain how to run the tests\n"
+    "3. Suggest additional edge cases to test\n\n"
+
+    "## Test Types\n"
+    "- Unit tests for individual functions\n"
+    "- Integration tests for workflows\n"
+    "- Edge case tests (empty input, null, large values)\n\n"
+
+    "## Handoffs\n"
+    "- Bugs found → Bug Diagnosis Agent\n"
+    "- Security tests needed → Security Review Agent\n"
+    "- Done → Triage Agent"
+  )
 
 
 test_generator_agent = Agent[CopilotChatContext](
     name="Test Generator Agent",
     model=MODEL,
-    handoff_description="Generates unit tests, integration tests, and load/performance tests.",
+    handoff_description="Generates unit tests for real GitHub code.",
     instructions=test_generator_instructions,
-    tools=[generate_unit_tests, generate_load_tests, analyze_coverage],
+    tools=[generate_tests_for_github_file],
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 
@@ -166,33 +234,66 @@ def security_review_instructions(
     run_context: RunContextWrapper[CopilotChatContext], agent: Agent[CopilotChatContext]
 ) -> str:
     ctx = run_context.context.state
-    project = ctx.project_name or "[unknown]"
+    project = ctx.project_name or "[no project loaded]"
     security_score = ctx.security_score or "[not scanned]"
     vulns = len(ctx.vulnerabilities) if ctx.vulnerabilities else 0
     
-    return (
-        f"{RECOMMENDED_PROMPT_PREFIX}\n"
-        "You are the Security Review Agent. You scan for vulnerabilities, check configurations, and audit dependencies.\n\n"
-        f"Current project: {project}\n"
-        f"Security score: {security_score}/100\n"
-        f"Known vulnerabilities: {vulns}\n\n"
-        "Your workflow:\n"
-        "1. Use scan_vulnerabilities for OWASP-style security checks\n"
-        "2. Use check_rate_limiting to verify API protection\n"
-        "3. Use audit_dependencies to find vulnerable packages\n\n"
-        "Work autonomously: perform a comprehensive security review.\n"
-        "If code fixes are needed, hand off to the Refactoring Agent.\n"
-        "If testing is needed to verify fixes, hand off to the Test Generator Agent.\n"
-        "When done or if the topic changes, hand off back to the Triage Agent."
-    )
+    if ctx.repo_context:
+        repo = ctx.repo_context
+        files_loaded = len(repo.file_contents)
+        total_files = repo.total_files
+        repo_status = (
+            f"✅ Repository loaded: {repo.meta.full_name} "
+            f"({files_loaded} files fetched of {total_files} total)"
+        )
+        available_files = "\n".join(
+            f"  - {path}" for path in list(repo.file_contents.keys())[:10]
+        )
+        if files_loaded > 10:
+            available_files += f"\n  - ... and {files_loaded - 10} more"
+    else:
+        repo_status = "⚠️ No repository loaded. Ask user for a GitHub URL."
+        available_files = ""
 
+    return (
+    f"{RECOMMENDED_PROMPT_PREFIX}\n"
+    "You are the Security Review Agent. You scan real GitHub code for vulnerabilities.\n\n"
+
+    f"Current project: {project}\n"
+    f"Security score: {security_score}/100\n"
+    f"Known vulnerabilities: {vulns}\n"
+    f"Repo status: {repo_status}\n"
+    + (f"Available files:\n{available_files}\n" if available_files else "")
+    +
+    "\n## Code Access\n"
+    "Repository data is preloaded. No fetching required.\n\n"
+
+    "## Your Workflow\n"
+    "1. For a specific file: use `analyze_github_code` with the file_path parameter\n"
+    "2. For the entire loaded repository: use `scan_github_repo_security` "
+    "(scans all preloaded files automatically)\n"
+    "3. Report vulnerabilities with severity levels (CRITICAL, HIGH, MEDIUM, LOW)\n"
+    "4. Provide specific remediation steps\n\n"
+
+    "## What You Check For\n"
+    "- SQL Injection\n"
+    "- Hardcoded secrets/credentials\n"
+    "- Command injection (eval, exec, os.system)\n"
+    "- Missing input validation\n"
+    "- Insecure cryptography\n\n"
+
+    "## Handoffs\n"
+    "- Code fixes needed → Refactoring Agent\n"
+    "- Need security tests → Test Generator Agent\n"
+    "- Done → Triage Agent"
+)
 
 security_review_agent = Agent[CopilotChatContext](
     name="Security Review Agent",
     model=MODEL,
-    handoff_description="Scans for security vulnerabilities, checks rate limiting, and audits dependencies.",
+    handoff_description="Scans real GitHub code for security vulnerabilities.",
     instructions=security_review_instructions,
-    tools=[scan_vulnerabilities, check_rate_limiting, audit_dependencies],
+    tools=[analyze_github_code, scan_github_repo_security],
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 
@@ -205,31 +306,63 @@ def documentation_instructions(
     run_context: RunContextWrapper[CopilotChatContext], agent: Agent[CopilotChatContext]
 ) -> str:
     ctx = run_context.context.state
-    project = ctx.project_name or "[unknown]"
-    doc_type = ctx.documentation_type or "[none generated]"
+    project = ctx.project_name or "[no project loaded]"
+    current_file = ctx.current_file or "[no file loaded]"
     
+    if ctx.repo_context:
+        repo = ctx.repo_context
+        files_loaded = len(repo.file_contents)
+        total_files = repo.total_files
+        repo_status = (
+            f"✅ Repository loaded: {repo.meta.full_name} "
+            f"({files_loaded} files fetched of {total_files} total)"
+        )
+        available_files = "\n".join(
+            f"  - {path}" for path in list(repo.file_contents.keys())[:10]
+        )
+        if files_loaded > 10:
+            available_files += f"\n  - ... and {files_loaded - 10} more"
+    else:
+        repo_status = "⚠️ No repository loaded. Ask user for a GitHub URL."
+        available_files = ""
+
     return (
-        f"{RECOMMENDED_PROMPT_PREFIX}\n"
-        "You are the Documentation Agent. You generate API docs, explain code, and create docstrings.\n\n"
-        f"Current project: {project}\n"
-        f"Last doc type generated: {doc_type}\n\n"
-        "Your workflow:\n"
-        "1. Use explain_code to provide code walkthroughs\n"
-        "2. Use generate_api_docs for API documentation\n"
-        "3. Use generate_docstrings for inline documentation\n\n"
-        "Work autonomously: create comprehensive, clear documentation.\n"
-        "If you need to understand bugs first, hand off to the Bug Diagnosis Agent.\n"
-        "If code improvements are needed, hand off to the Refactoring Agent.\n"
-        "When done or if the topic changes, hand off back to the Triage Agent."
-    )
+    f"{RECOMMENDED_PROMPT_PREFIX}\n"
+    "You are the Documentation Agent. You explain and document real GitHub code.\n\n"
+
+    f"Current project: {project}\n"
+    f"Current file: {current_file}\n"
+    f"Repo status: {repo_status}\n"
+    + (f"Available files:\n{available_files}\n" if available_files else "")
+    +
+    "\n## Code Access\n"
+    "Repository data is preloaded. Use `explain_github_code` or `get_repo_structure` directly.\n"
+    "You can specify a file_path parameter to explain a specific file.\n\n"
+
+    "## Your Workflow\n"
+    "1. Use `explain_github_code` to analyze code structure\n"
+    "2. Use `get_repo_structure` to understand the project layout\n"
+    "3. Generate clear documentation\n\n"
+
+    "## What You Generate\n"
+    "- Code explanations (what does this code do?)\n"
+    "- Docstrings for functions and classes\n"
+    "- API documentation\n"
+    "- README content\n\n"
+
+    "## Handoffs\n"
+    "- Need to understand bugs → Bug Diagnosis Agent\n"
+    "- Code improvements needed → Refactoring Agent\n"
+    "- Done → Triage Agent"
+)
 
 
 documentation_agent = Agent[CopilotChatContext](
     name="Documentation Agent",
     model=MODEL,
-    handoff_description="Generates API documentation, explains code, and creates docstrings.",
+    handoff_description="Explains and documents real GitHub code.",
     instructions=documentation_instructions,
-    tools=[generate_api_docs, explain_code, generate_docstrings],
+    tools=[explain_github_code, get_repo_structure],
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 
@@ -237,112 +370,122 @@ documentation_agent = Agent[CopilotChatContext](
 # ============================================================================
 # TRIAGE AGENT (Entry Point)
 # ============================================================================
+def triage_instructions(
+    run_context: RunContextWrapper[CopilotChatContext], agent: Agent[CopilotChatContext]
+) -> str:
+    ctx = run_context.context.state
+
+    if ctx.repo_context:
+        repo = ctx.repo_context
+        repo_status = (
+            f"✅ Repository preloaded: {repo.meta.full_name} "
+            f"({len(repo.file_contents)} files ready for analysis)"
+        )
+    else:
+        repo_status = "⚠️ No repository loaded yet."
+
+    return (
+        f"{RECOMMENDED_PROMPT_PREFIX}\n"
+        "You are the Triage Agent for an AI Software Engineering Copilot.\n\n"
+
+        f"Current repo status: {repo_status}\n\n"
+
+        "## Your Job\n"
+        "Route users to the right specialist based on their needs:\n\n"
+
+        "• **Bug Diagnosis Agent** → Performance issues, errors, bugs, slow code\n"
+        "• **Refactoring Agent** → Code improvements, design patterns, code quality\n"
+        "• **Test Generator Agent** → Unit tests, test coverage\n"
+        "• **Security Review Agent** → Vulnerabilities, security audit\n"
+        "• **Documentation Agent** → Code explanation, docs, README\n\n"
+
+        "## GitHub URL Handling\n"
+        "When a user provides a GitHub URL, the repository is loaded automatically "
+        "before you receive the message. You do NOT need to fetch anything.\n"
+        "1. Use `detect_github_url` to confirm what was detected and show the user\n"
+        "2. Immediately hand off to the appropriate specialist\n\n"
+
+        "## Routing Examples\n"
+        "- 'Analyze https://github.com/user/repo/blob/main/app.py for bugs' → Bug Diagnosis Agent\n"
+        "- 'Check security of https://github.com/user/repo' → Security Review Agent\n"
+        "- 'Generate tests for https://github.com/user/repo/file.py' → Test Generator Agent\n"
+        "- 'Explain https://github.com/user/repo/blob/main/utils.py' → Documentation Agent\n"
+        "- 'Refactor this code' → Refactoring Agent\n\n"
+
+        "## If No GitHub URL\n"
+        "Ask the user to provide a GitHub URL. Example:\n"
+        "'Please provide a GitHub URL to analyze. "
+        "For example: https://github.com/username/repo/blob/main/file.py'"
+    )
+
 
 triage_agent = Agent[CopilotChatContext](
     name="Triage Agent",
     model=MODEL,
     handoff_description="Routes requests to the appropriate specialist agent.",
-    instructions=(
-        f"{RECOMMENDED_PROMPT_PREFIX}\n"
-        "You are the Triage Agent for an AI Software Engineering Copilot. "
-        "Route users to the appropriate specialist:\n\n"
-        "• Bug Diagnosis Agent: For errors, performance issues, slow APIs, crashes, logs analysis\n"
-        "• Refactoring Agent: For code improvements, design patterns, code quality\n"
-        "• Test Generator Agent: For unit tests, load tests, test coverage\n"
-        "• Security Review Agent: For vulnerabilities, rate limiting, dependency audits\n"
-        "• Documentation Agent: For API docs, code explanations, docstrings\n\n"
-        "First, if the user describes a project or issue, use detect_project to understand the context.\n"
-        "Then hand off to the most appropriate agent based on the user's needs.\n"
-        "If the user says 'my API is slow', that's a performance issue - hand off to Bug Diagnosis.\n"
-        "Work efficiently: detect the project, then hand off immediately without asking clarifying questions."
-    ),
-    tools=[detect_project],
-    handoffs=[],  # Will be set below
+    instructions=triage_instructions,   # ← now a function, not a string
+    tools=[detect_github_url],
+    handoffs=[],
     input_guardrails=[relevance_guardrail, jailbreak_guardrail],
 )
 
 
-# ============================================================================
-# HANDOFF CALLBACKS
-# ============================================================================
-
-async def on_diagnosis_handoff(context: RunContextWrapper[CopilotChatContext]) -> None:
-    """Ensure context is hydrated when handing off to bug diagnosis agent."""
-    apply_codebase_defaults(context.context.state)
-
-
-async def on_refactoring_handoff(context: RunContextWrapper[CopilotChatContext]) -> None:
-    """Prepare context when handing off to refactoring agent."""
-    apply_codebase_defaults(context.context.state)
 
 
 async def on_testing_handoff(context: RunContextWrapper[CopilotChatContext]) -> None:
-    """Prepare context when handing off to test generator agent."""
-    apply_codebase_defaults(context.context.state)
-    if context.context.state.test_framework is None:
-        # Default to pytest for Python projects
-        if context.context.state.language == "python":
-            context.context.state.test_framework = "pytest"
+    """Prepare context for test generator agent."""
+    ctx = context.context.state
+    # Set default test framework based on language
+    if ctx.test_framework is None:
+        if ctx.language == "python":
+            ctx.test_framework = "pytest"
+        elif ctx.language in ("javascript", "typescript"):
+            ctx.test_framework = "jest"
         else:
-            context.context.state.test_framework = "jest"
+            ctx.test_framework = "pytest"  # Default
 
-
-async def on_security_handoff(context: RunContextWrapper[CopilotChatContext]) -> None:
-    """Prepare context when handing off to security agent."""
-    apply_codebase_defaults(context.context.state)
-
-
-async def on_documentation_handoff(context: RunContextWrapper[CopilotChatContext]) -> None:
-    """Prepare context when handing off to documentation agent."""
-    apply_codebase_defaults(context.context.state)
 
 
 # ============================================================================
 # SET UP HANDOFF RELATIONSHIPS
 # ============================================================================
 
-# Triage can hand off to all specialists
 triage_agent.handoffs = [
-    handoff(agent=bug_diagnosis_agent, on_handoff=on_diagnosis_handoff),
-    handoff(agent=refactoring_agent, on_handoff=on_refactoring_handoff),
-    handoff(agent=test_generator_agent, on_handoff=on_testing_handoff),
-    handoff(agent=security_review_agent, on_handoff=on_security_handoff),
-    handoff(agent=documentation_agent, on_handoff=on_documentation_handoff),
+    handoff(agent=bug_diagnosis_agent),
+    handoff(agent=refactoring_agent),
+    handoff(agent=test_generator_agent, on_handoff=on_testing_handoff),  # keep — has logic
+    handoff(agent=security_review_agent),
+    handoff(agent=documentation_agent),
 ]
 
-# Bug Diagnosis can hand off to related agents
 bug_diagnosis_agent.handoffs = [
-    handoff(agent=refactoring_agent, on_handoff=on_refactoring_handoff),
+    handoff(agent=refactoring_agent),
     handoff(agent=test_generator_agent, on_handoff=on_testing_handoff),
-    handoff(agent=security_review_agent, on_handoff=on_security_handoff),
+    handoff(agent=security_review_agent),
     triage_agent,
 ]
 
-# Refactoring can hand off to related agents
 refactoring_agent.handoffs = [
     handoff(agent=test_generator_agent, on_handoff=on_testing_handoff),
-    handoff(agent=security_review_agent, on_handoff=on_security_handoff),
-    handoff(agent=documentation_agent, on_handoff=on_documentation_handoff),
+    handoff(agent=security_review_agent),
+    handoff(agent=documentation_agent),
     triage_agent,
 ]
 
-# Test Generator can hand off to related agents
 test_generator_agent.handoffs = [
-    handoff(agent=bug_diagnosis_agent, on_handoff=on_diagnosis_handoff),
-    handoff(agent=security_review_agent, on_handoff=on_security_handoff),
+    handoff(agent=bug_diagnosis_agent),
+    handoff(agent=security_review_agent),
     triage_agent,
 ]
 
-# Security Review can hand off to related agents
 security_review_agent.handoffs = [
-    handoff(agent=refactoring_agent, on_handoff=on_refactoring_handoff),
+    handoff(agent=refactoring_agent),
     handoff(agent=test_generator_agent, on_handoff=on_testing_handoff),
     triage_agent,
 ]
 
-# Documentation can hand off to related agents
 documentation_agent.handoffs = [
-    handoff(agent=bug_diagnosis_agent, on_handoff=on_diagnosis_handoff),
-    handoff(agent=refactoring_agent, on_handoff=on_refactoring_handoff),
+    handoff(agent=bug_diagnosis_agent),
+    handoff(agent=refactoring_agent),
     triage_agent,
 ]
